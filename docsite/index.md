@@ -9,4 +9,4 @@ This documentation describes the PoC for batching data into analytics storage us
 - The API service accepts file uploads and streams rows to Redpanda.
 - A background worker consumes each job's topic, validates rows against the registered model schema, and inserts good rows into ClickHouse.
 
-See the other pages in this documentation for REST API details, Kafka topics, and message schemas.
+See the other pages in this documentation for CLI usage, REST API details, Kafka topics, and message schemas.
