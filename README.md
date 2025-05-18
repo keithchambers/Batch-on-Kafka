@@ -20,3 +20,13 @@ Set `BATCH_API_URL` and `KAFKA_BOOTSTRAP` if running the services elsewhere:
 export BATCH_API_URL=http://localhost:8000
 export KAFKA_BOOTSTRAP=localhost:9092
 ```
+
+### Linting and Tests
+
+Install development dependencies and run the linter and test suite:
+
+```bash
+pip install ruff pytest
+ruff batch tests
+pytest
+```

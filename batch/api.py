@@ -4,6 +4,7 @@ from uuid import uuid4
 import os
 import csv
 import asyncio
+import logging
 from typing import Dict, Any, Optional
 
 import pyarrow.parquet as pq
@@ -17,6 +18,9 @@ MAX_FILE_SIZE = 1 * 1024 * 1024 * 1024  # 1GB
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "redpanda:9092")
 _producer: Optional[AIOKafkaProducer] = None
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 async def get_producer() -> AIOKafkaProducer:
     global _producer
@@ -25,10 +29,11 @@ async def get_producer() -> AIOKafkaProducer:
     while True:
         try:
             await _producer.start()
+            logger.info("Connected to Kafka at %s", KAFKA_BOOTSTRAP)
             break
         except Exception as exc:
             # keep retrying until Redpanda is available
-            print(f"Producer connect failed: {exc}. Retrying...")
+            logger.warning("Producer connect failed: %s. Retrying...", exc)
             await asyncio.sleep(5)
     return _producer
 
@@ -110,13 +115,15 @@ async def create_job(model_id: str, file: UploadFile = File(...)):
     with open(tmp_path, "wb") as f:
         f.write(contents)
 
-    _peek_validate(tmp_path, ext)
-
-    producer = await get_producer()
     job_id = uuid4().hex[:8]
     topic = f"/batch/{job_id}"
-    await producer.send_and_wait(topic, contents)
-    os.remove(tmp_path)
+    try:
+        _peek_validate(tmp_path, ext)
+        producer = await get_producer()
+        await producer.send_and_wait(topic, contents)
+        logger.info("Created job %s on topic %s", job_id, topic)
+    finally:
+        os.remove(tmp_path)
 
     JOBS[job_id] = {
         "id": job_id,

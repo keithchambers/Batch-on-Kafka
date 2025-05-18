@@ -21,7 +21,7 @@ async def _start(client):
 
 async def consume(job_id: str):
     topic = f"/batch/{job_id}"
-    dql_topic = f"/batch/{job_id}/dql"
+    dlq_topic = f"/batch/{job_id}/dlq"
     consumer = AIOKafkaConsumer(topic, bootstrap_servers=KAFKA_BOOTSTRAP)
     producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP)
     await _start(consumer)
@@ -33,7 +33,7 @@ async def consume(job_id: str):
                 logger.info("Got message from %s offset %s", topic, msg.offset)
             except Exception as exc:
                 logger.error("Processing failed: %s", exc)
-                await producer.send_and_wait(dql_topic, msg.value)
+                await producer.send_and_wait(dlq_topic, msg.value)
     finally:
         await consumer.stop()
         await producer.stop()
