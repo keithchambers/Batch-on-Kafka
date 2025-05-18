@@ -4,3 +4,4 @@ aiokafka
 typer
 requests
 pyarrow
+clickhouse-connect

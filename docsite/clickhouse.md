@@ -2,6 +2,9 @@
 
 Validated rows are stored in ClickHouse for analytical queries.
 
+The provided `docker-compose.yml` includes a `clickhouse` service using the latest image.
+When the stack is started locally, the database is reachable at `http://localhost:8123`.
+
 ```sql
 -- Example per-model table
 CREATE TABLE data_<model_id> (

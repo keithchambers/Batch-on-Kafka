@@ -5,6 +5,15 @@ services:
     command: ["redpanda", "start", "--smp", "1", "--reserve-memory", "0M", "--overprovisioned"]
     ports:
       - "9092:9092"
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    ports:
+      - "8123:8123"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
   api:
     build: .
     volumes:
@@ -21,5 +30,7 @@ services:
     command: python -m batch.worker
     depends_on:
       - redpanda
+      - clickhouse
     environment:
       - KAFKA_BOOTSTRAP=redpanda:9092
+      - CLICKHOUSE_HOST=clickhouse
