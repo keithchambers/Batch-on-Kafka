@@ -17,7 +17,7 @@
 {"offset": 0, "payload": "<raw-csv-or-parquet-row-as-bytes>"}
 ```
 
-## Dead-Letter Row (`/batch/<job_id>/dql`)
+## Dead-Letter Row (`/batch/<job_id>/dlq`)
 ```json
 {
   "row": 1,
