@@ -130,6 +130,7 @@ async def create_job(model_id: str, file: UploadFile = File(...)):
         "model_id": model_id,
         "state": "PENDING",
         "totals": {"rows": 0, "ok": 0, "errors": 0},
+        "timings": {"waiting_ms": 0, "processing_ms": 0},
     }
     return {"job_id": job_id}
 
