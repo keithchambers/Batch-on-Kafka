@@ -13,6 +13,7 @@ docker-compose up --build
 ```
 
 The API will be available at `http://localhost:8000` and Redpanda at `localhost:9092`.
+ClickHouse (latest image) will be available at `http://localhost:8123`.
 Use the CLI via `python -m batch.cli`.
 Set `BATCH_API_URL` and `KAFKA_BOOTSTRAP` if running the services elsewhere:
 
