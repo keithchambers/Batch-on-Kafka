@@ -22,5 +22,4 @@ services:
     depends_on:
       - redpanda
     environment:
-      - BATCH_API_URL=http://api:8000
       - KAFKA_BOOTSTRAP=redpanda:9092
