@@ -15,6 +15,7 @@ app = FastAPI()
 MODELS: Dict[str, Dict[str, Any]] = {}
 JOBS: Dict[str, Dict[str, Any]] = {}
 MAX_FILE_SIZE = 1 * 1024 * 1024 * 1024  # 1GB
+KAFKA_MAX_RETRIES = 12
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "redpanda:9092")
 _producer: Optional[AIOKafkaProducer] = None
 
@@ -26,13 +27,19 @@ async def get_producer() -> AIOKafkaProducer:
     global _producer
     if _producer is None:
         _producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP)
+    attempts = 0
     while True:
         try:
             await _producer.start()
             logger.info("Connected to Kafka at %s", KAFKA_BOOTSTRAP)
             break
         except Exception as exc:
-            # keep retrying until Redpanda is available
+            attempts += 1
+            if attempts >= KAFKA_MAX_RETRIES:
+                logger.error(
+                    "Producer connect failed after %s attempts: %s", attempts, exc
+                )
+                raise
             logger.warning("Producer connect failed: %s. Retrying...", exc)
             await asyncio.sleep(5)
     return _producer
@@ -44,14 +51,18 @@ def _peek_validate(file_path: str, ext: str):
         with open(file_path, "rb") as f:
             head = f.read(1024)
         try:
-            head.decode("utf-8")
+            text = head.decode("utf-8")
         except UnicodeDecodeError as e:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST, detail=f"Invalid CSV encoding: {e}"
             )
+        lines = text.splitlines()
+        if not lines:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, detail="Empty CSV file or no newline"
+            )
         try:
-            sample = head.decode("utf-8").splitlines()[0]
-            csv.reader([sample])
+            csv.reader([lines[0]])
         except Exception as e:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST, detail=f"Invalid CSV content: {e}"
@@ -105,15 +116,25 @@ async def create_job(model_id: str, file: UploadFile = File(...)):
             status.HTTP_400_BAD_REQUEST, detail="File must be CSV or Parquet"
         )
 
-    contents = await file.read()
-    if len(contents) > MAX_FILE_SIZE:
-        raise HTTPException(
-            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File exceeds 1GB limit"
-        )
-
     tmp_path = f"/tmp/{uuid4().hex}{ext}"
+    size = 0
     with open(tmp_path, "wb") as f:
-        f.write(contents)
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > MAX_FILE_SIZE:
+                f.close()
+                os.remove(tmp_path)
+                raise HTTPException(
+                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail="File exceeds 1GB limit",
+                )
+            f.write(chunk)
+
+    with open(tmp_path, "rb") as f:
+        contents = f.read()
 
     job_id = uuid4().hex[:8]
     topic = f"/batch/{job_id}"
