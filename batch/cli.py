@@ -21,21 +21,22 @@ def _ms_to_time(ms: int) -> str:
 
 def _progress_bar(ok: int, total: int, state: str, width: int = 17) -> str:
     if total <= 0:
-        bar = "-" * width
+        filled = 0
     else:
-        filled = int((ok / total) * width)
-        remainder = width - filled
-        if state in {"FAILED", "CANCELLED"}:
-            bar = "#" * filled + "X" * remainder
-        else:
-            bar = "#" * filled + "-" * remainder
+        fraction = max(0.0, min(ok / total, 1.0))
+        filled = int(fraction * width)
+    remainder = width - filled
+    if total <= 0:
+        bar = "-" * width
+    elif state in {"FAILED", "CANCELLED"}:
+        bar = "#" * filled + "X" * remainder
+    else:
+        bar = "#" * filled + "-" * remainder
     return f"[{bar}]"
 
 
 def _format_jobs(jobs: List[Dict[str, Any]]) -> str:
-    header = (
-        "JOB      MODEL       STATE           TOTAL   OK      ERRORS  PROGRESS      WAITING  PROCESSSING"
-    )
+    header = "JOB      MODEL       STATE           TOTAL   OK      ERRORS  PROGRESS      WAITING  PROCESSSING"
     lines = [header]
     for job in jobs:
         total = job.get("totals", {}).get("rows", 0)
@@ -45,7 +46,10 @@ def _format_jobs(jobs: List[Dict[str, Any]]) -> str:
         processing = job.get("timings", {}).get("processing_ms", 0)
 
         bar = _progress_bar(ok, total, job.get("state", ""))
-        percent = int((ok / total) * 100) if total else 0
+        if total:
+            percent = int(min(max((ok / total) * 100, 0), 100))
+        else:
+            percent = 0
 
         model = job.get("model_id", "")
         if len(model) > 10:
