@@ -90,10 +90,22 @@ export KAFKA_BOOTSTRAP=localhost:9092
 Install development dependencies and run the linter and test suite:
 
 ```bash
-pip install ruff pytest
+pip install ruff
 ruff batch tests
-pytest
+python -m unittest discover -s tests
 ```
 
 See [docsite](./docsite) for detailed API and schema information.
+
+## Monitoring
+
+Prometheus and Grafana are included in `docker-compose.yml`.
+Start the full stack with monitoring using:
+
+```bash
+docker-compose up --build
+```
+
+Prometheus will be available at `http://localhost:9091` and Grafana at `http://localhost:3000`.
+The API exposes metrics at `/metrics` and the worker on port `9090`.
 

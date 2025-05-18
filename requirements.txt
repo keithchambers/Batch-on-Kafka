@@ -5,3 +5,4 @@ typer
 requests
 pyarrow
 clickhouse-connect
+prometheus_client
