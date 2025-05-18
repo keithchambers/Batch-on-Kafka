@@ -1,0 +1,26 @@
+version: '3.9'
+services:
+  redpanda:
+    image: docker.redpanda.com/redpanda/redpanda:latest
+    command: ["redpanda", "start", "--smp", "1", "--reserve-memory", "0M", "--overprovisioned"]
+    ports:
+      - "9092:9092"
+  api:
+    build: .
+    volumes:
+      - .:/app
+    environment:
+      - BATCH_API_URL=http://api:8000
+      - KAFKA_BOOTSTRAP=redpanda:9092
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redpanda
+  worker:
+    build: .
+    command: python -m batch.worker
+    depends_on:
+      - redpanda
+    environment:
+      - BATCH_API_URL=http://api:8000
+      - KAFKA_BOOTSTRAP=redpanda:9092

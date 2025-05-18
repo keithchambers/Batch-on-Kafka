@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+aiokafka
+typer
+requests
+pyarrow
