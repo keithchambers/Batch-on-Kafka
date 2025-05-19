@@ -2,9 +2,25 @@
 
 This repository contains a proof of concept for batch ingestion backed by **Redpanda** and **ClickHouse**. Uploads are sent through a FastAPI service, written to Redpanda, validated by a worker, and stored in ClickHouse.
 
+## Installation
+
+This project requires **Python&nbsp;3.11**. Install the runtime dependencies
+into a virtual environment and expose the CLI:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pip install -e .
+```
+
+The `batch` command is now available and can also be invoked with
+`python -m batch`.
+
 ## Quick Start
 
-Follow these steps to see the system handle a successful upload (the "happy path") and a file with bad data that results in rejected rows.
+Follow these steps to see the system handle a successful upload (the "happy"
+path) and a file with bad data that results in rejected rows.
 
 ### 1. Start the stack
 
@@ -78,11 +94,21 @@ curl "http://localhost:8123/?query=SELECT%20*%20FROM%20rejected_rows%20WHERE%20j
 
 ## Local Development
 
-Use the CLI via `batch`. Set `BATCH_API_URL` and `KAFKA_BOOTSTRAP` if running the services elsewhere:
+Use the CLI via `batch` or `python -m batch`. Set environment variables if running the services elsewhere:
 
 ```bash
 export BATCH_API_URL=http://localhost:8000
 export KAFKA_BOOTSTRAP=localhost:9092
+export CLICKHOUSE_HOST=localhost
+export CLICKHOUSE_PORT=8123
+export METRICS_PORT=9090  # worker metrics
+```
+
+Start the services locally without Docker using:
+
+```bash
+uvicorn batch.api:app --reload  # API on port 8000
+python -m batch.worker          # background worker
 ```
 
 ### Linting and Tests
