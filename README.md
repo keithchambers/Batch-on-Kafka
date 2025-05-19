@@ -44,6 +44,12 @@ Register the model and note the returned `model_id`:
 batch model create purchases model.json
 ```
 
+Sample output:
+
+```text
+{"id": "a1b2c3d4", "name": "purchases", "schema": "{\"event_id\": \"String\", \"timestamp\": \"UInt32\", \"amount\": \"Float64\"}"}
+```
+
 ### 3. Ingest valid data
 
 Prepare a CSV file that matches the schema, e.g. `data.csv`:
@@ -60,16 +66,36 @@ Create a job for the file:
 batch job create <model_id> data.csv
 ```
 
+Sample output:
+
+```text
+job e5f6a7b8 created.
+```
+
 Check progress until the job state becomes `SUCCESS`:
 
 ```bash
 batch job status <job_id>
 ```
 
+Sample output:
+
+```text
+JOB      MODEL       STATE           TOTAL   OK      ERRORS  PROGRESS      WAITING  PROCESSSING
+abcd1234 purchases   SUCCESS               2       2       0 [#################] 100%   00:00        00:02
+```
+
 Query ClickHouse to view the inserted rows:
 
 ```bash
 curl "http://localhost:8123/?query=SELECT%20*%20FROM%20data_<model_id>"
+```
+
+Sample output:
+
+```text
+1\t1716045542\t12.5
+2\t1716045543\t8.0
 ```
 
 ### 4. Rejected data path
@@ -80,16 +106,35 @@ Upload a CSV containing invalid rows, e.g. `bad.csv` with missing or malformed v
 batch job create <model_id> bad.csv
 ```
 
+Sample output:
+
+```text
+job b7c8d9e0 created.
+```
+
 When the job state is `PARTIAL_SUCCESS` or `FAILED`, inspect the problems:
 
 ```bash
 batch job rejected <job_id>
 ```
 
+Sample output:
+
+```text
+ROW,EVENT_ID,COLUMN,TYPE,ERROR,OBSERVED,MESSAGE
+1,1001abcd,timestamp,TIMESTAMP,MISSING_COLUMN,,"The required column 'timestamp' is missing"
+```
+
 Rejected rows are also stored in ClickHouse and can be queried directly:
 
 ```bash
 curl "http://localhost:8123/?query=SELECT%20*%20FROM%20rejected_rows%20WHERE%20job_id='<job_id>'"
+```
+
+Sample output:
+
+```text
+<job_id>\t1001abcd\ttimestamp\tMISSING_COLUMN
 ```
 
 ## Local Development
