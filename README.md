@@ -28,7 +28,7 @@ Register the model and note the returned `model_id`:
 python -m batch.cli model create purchases model.json
 ```
 
-### 3. Happy path: ingest valid data
+### 3. Ingest valid data
 
 Prepare a CSV file that matches the schema, e.g. `data.csv`:
 
