@@ -1,6 +1,6 @@
 # Command-Line Interface (CLI)
 
-A rich CLI is provided for interacting with the batch ingestion service. Run commands via `batch.cli <command>` or `./batchcli <command>` if the project has been built locally.
+A rich CLI is provided for interacting with the batch ingestion service. Run commands via `batch <command>` or `./batch <command>` if the project has been built locally.
 
 Ensure the API URL is set if the server is not running at the default `http://localhost:8000`:
 
@@ -14,35 +14,35 @@ export BATCH_API_URL=http://localhost:8000
 Lists available models.
 
 ```bash
-./batchcli model list
+./batch model list
 ```
 
 ### `model describe <model_id>`
 Shows details for a specific model.
 
 ```bash
-./batchcli model describe <model_id>
+./batch model describe <model_id>
 ```
 
 ### `model create <model_name> <path/to/schema.json>`
 Creates a new model from a name and a JSON schema file.
 
 ```bash
-./batchcli model create my_new_model ./schemas/new_model_schema.json
+./batch model create my_new_model ./schemas/new_model_schema.json
 ```
 
 ### `model update <model_id> <path/to/schema.json>`
 Updates the schema for an existing model.
 
 ```bash
-./batchcli model update <model_id> ./schemas/updated_schema.json
+./batch model update <model_id> ./schemas/updated_schema.json
 ```
 
 ### `model delete <model_id>`
 Deletes a model.
 
 ```bash
-./batchcli model delete <model_id>
+./batch model delete <model_id>
 ```
 
 ## Job Commands
@@ -51,7 +51,7 @@ Deletes a model.
 Lists existing jobs with their status.
 
 ```bash
-./batchcli job list
+./batch job list
 ```
 
 Sample output:
@@ -76,7 +76,7 @@ a9b0c1d2 Market Pr.. SUCCESS           3,200   3,200       0 [#################]
 Creates a new job for the given model and data file.
 
 ```bash
-./batchcli job create model_123 data.csv
+./batch job create model_123 data.csv
 ```
 
 Sample output:
@@ -89,7 +89,7 @@ job a5b6c7d8 created.
 Shows the status of a specific job.
 
 ```bash
-./batchcli job status a6b7c8d9
+./batch job status a6b7c8d9
 ```
 
 Sample output:
@@ -106,7 +106,7 @@ a5b6c7d8 model_123.. PENDING             100       0       0 [-----------------]
 Cancels a job.
 
 ```bash
-./batchcli job cancel a5b6c7d8
+./batch job cancel a5b6c7d8
 ```
 
 Sample output:
@@ -119,7 +119,7 @@ job a5b6c7d8 cancelled
 Displays rows that were rejected during processing for a specific job.
 
 ```bash
-./batchcli job rejected a5b6c7d8
+./batch job rejected a5b6c7d8
 ```
 
 Sample output:

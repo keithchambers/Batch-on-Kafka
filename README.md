@@ -25,7 +25,7 @@ Create a simple JSON schema and save it as `model.json`:
 Register the model and note the returned `model_id`:
 
 ```bash
-python -m batch.cli model create purchases model.json
+batch model create purchases model.json
 ```
 
 ### 3. Ingest valid data
@@ -41,13 +41,13 @@ event_id,timestamp,amount
 Create a job for the file:
 
 ```bash
-python -m batch.cli job create <model_id> data.csv
+batch job create <model_id> data.csv
 ```
 
 Check progress until the job state becomes `SUCCESS`:
 
 ```bash
-python -m batch.cli job status <job_id>
+batch job status <job_id>
 ```
 
 Query ClickHouse to view the inserted rows:
@@ -61,13 +61,13 @@ curl "http://localhost:8123/?query=SELECT%20*%20FROM%20data_<model_id>"
 Upload a CSV containing invalid rows, e.g. `bad.csv` with missing or malformed values:
 
 ```bash
-python -m batch.cli job create <model_id> bad.csv
+batch job create <model_id> bad.csv
 ```
 
 When the job state is `PARTIAL_SUCCESS` or `FAILED`, inspect the problems:
 
 ```bash
-python -m batch.cli job rejected <job_id>
+batch job rejected <job_id>
 ```
 
 Rejected rows are also stored in ClickHouse and can be queried directly:
@@ -78,7 +78,7 @@ curl "http://localhost:8123/?query=SELECT%20*%20FROM%20rejected_rows%20WHERE%20j
 
 ## Local Development
 
-Use the CLI via `python -m batch.cli`. Set `BATCH_API_URL` and `KAFKA_BOOTSTRAP` if running the services elsewhere:
+Use the CLI via `batch`. Set `BATCH_API_URL` and `KAFKA_BOOTSTRAP` if running the services elsewhere:
 
 ```bash
 export BATCH_API_URL=http://localhost:8000
