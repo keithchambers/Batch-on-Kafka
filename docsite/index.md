@@ -10,4 +10,3 @@ This documentation describes the PoC for batching data into analytics storage us
 - A background worker consumes each job's topic, validates rows against the registered model schema, and inserts good rows into ClickHouse.
 
 See the other pages in this documentation for CLI usage, REST API details, Kafka topics, and message schemas.
-The [metrics](metrics.md) page explains Prometheus and Grafana setup.
