@@ -146,7 +146,6 @@ export BATCH_API_URL=http://localhost:8000
 export KAFKA_BOOTSTRAP=localhost:9092
 export CLICKHOUSE_HOST=localhost
 export CLICKHOUSE_PORT=8123
-export METRICS_PORT=9090  # worker metrics
 ```
 
 Start the services locally without Docker using:
@@ -168,15 +167,4 @@ python -m unittest discover -s tests
 
 See [docsite](./docsite) for detailed API and schema information.
 
-## Monitoring
-
-Prometheus and Grafana are included in `docker-compose.yml`.
-Start the full stack with monitoring using:
-
-```bash
-docker-compose up --build
-```
-
-Prometheus will be available at `http://localhost:9091` and Grafana at `http://localhost:3000`.
-The API exposes metrics at `/metrics` and the worker on port `9090`.
 

@@ -1,71 +1,37 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, status, Request
-from fastapi.responses import JSONResponse, StreamingResponse, Response
+from fastapi.responses import JSONResponse, StreamingResponse
 from uuid import uuid4
 import os
 import csv
 import asyncio
 import logging
 from typing import Dict, Any, Optional
-import time
 
 import pyarrow.parquet as pq
 from aiokafka import AIOKafkaProducer
-from prometheus_client import (
-    Counter,
-    Histogram,
-    generate_latest,
-    CONTENT_TYPE_LATEST,
-)
 
 app = FastAPI()
 
 MODELS: Dict[str, Dict[str, Any]] = {}
 JOBS: Dict[str, Dict[str, Any]] = {}
 MAX_FILE_SIZE = 1 * 1024 * 1024 * 1024  # 1GB
-KAFKA_MAX_RETRIES = 12
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "redpanda:9092")
 _producer: Optional[AIOKafkaProducer] = None
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Prometheus metrics
-REQUEST_LATENCY = Histogram(
-    "api_request_latency_seconds",
-    "API request latency",
-    ["endpoint"],
-)
-UPLOAD_SIZE = Histogram("api_upload_size_bytes", "Uploaded file sizes")
-JOBS_CREATED = Counter("api_jobs_created_total", "Jobs created")
-VALIDATION_ERRORS = Counter("api_validation_errors_total", "Validation errors")
-
-
-@app.middleware("http")
-async def record_latency(request: Request, call_next):
-    start = time.perf_counter()
-    response = await call_next(request)
-    elapsed = time.perf_counter() - start
-    REQUEST_LATENCY.labels(request.url.path).observe(elapsed)
-    return response
-
 
 async def get_producer() -> AIOKafkaProducer:
     global _producer
     if _producer is None:
         _producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP)
-    attempts = 0
     while True:
         try:
             await _producer.start()
             logger.info("Connected to Kafka at %s", KAFKA_BOOTSTRAP)
             break
         except Exception as exc:
-            attempts += 1
-            if attempts >= KAFKA_MAX_RETRIES:
-                logger.error(
-                    "Producer connect failed after %s attempts: %s", attempts, exc
-                )
-                raise
             logger.warning("Producer connect failed: %s. Retrying...", exc)
             await asyncio.sleep(5)
     return _producer
@@ -158,7 +124,6 @@ async def create_job(model_id: str, file: UploadFile = File(...)):
                     detail="File exceeds 1GB limit",
                 )
             f.write(chunk)
-    UPLOAD_SIZE.observe(size)
 
     with open(tmp_path, "rb") as f:
         contents = f.read()
@@ -168,7 +133,6 @@ async def create_job(model_id: str, file: UploadFile = File(...)):
     try:
         _peek_validate(tmp_path, ext)
     except HTTPException:
-        VALIDATION_ERRORS.inc()
         os.remove(tmp_path)
         raise
 
@@ -186,7 +150,6 @@ async def create_job(model_id: str, file: UploadFile = File(...)):
         "totals": {"rows": 0, "ok": 0, "errors": 0},
         "timings": {"waiting_ms": 0, "processing_ms": 0},
     }
-    JOBS_CREATED.inc()
     return {"job_id": job_id}
 
 
@@ -224,7 +187,3 @@ def rejected_rows(job_id: str):
     return StreamingResponse(iterator(), media_type="text/csv")
 
 
-@app.get("/metrics")
-def metrics() -> Response:
-    data = generate_latest()
-    return Response(data, media_type=CONTENT_TYPE_LATEST)

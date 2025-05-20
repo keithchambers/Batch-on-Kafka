@@ -32,24 +32,5 @@ services:
     environment:
       - KAFKA_BOOTSTRAP=redpanda:9092
       - CLICKHOUSE_HOST=clickhouse
-      - METRICS_PORT=9090
 
-  prometheus:
-    image: prom/prometheus:latest
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-    ports:
-      - "9091:9090"
-    depends_on:
-      - api
-      - worker
 
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3000:3000"
-    volumes:
-      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
-      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
-    depends_on:
-      - prometheus

@@ -5,8 +5,6 @@ import logging
 import os
 from typing import List, Dict
 
-from prometheus_client import Counter, Histogram, start_http_server
-
 import pyarrow.parquet as pq
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
@@ -27,29 +25,15 @@ def _parse_rows(data: bytes) -> List[Dict[str, str]]:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Prometheus metrics
-ROWS_PROCESSED = Counter("worker_rows_total", "Rows processed")
-ROWS_INSERTED = Counter("worker_rows_inserted_total", "Rows inserted")
-DLQ_EVENTS = Counter("worker_dlq_total", "DLQ events")
-PROCESSING_TIME = Histogram("worker_processing_seconds", "Row processing time")
-
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "redpanda:9092")
-KAFKA_MAX_RETRIES = 12
 
 
 async def _start(client):
-    attempts = 0
     while True:
         try:
             await client.start()
             break
         except Exception as exc:
-            attempts += 1
-            if attempts >= KAFKA_MAX_RETRIES:
-                logger.error(
-                    "Kafka connect failed after %s attempts: %s", attempts, exc
-                )
-                raise
             logger.warning("Kafka connect failed: %s. Retrying...", exc)
             await asyncio.sleep(5)
 
@@ -69,21 +53,18 @@ async def consume(job_id: str, model_id: str) -> None:
                 logger.info("Got message from %s offset %s", topic, msg.offset)
                 start = asyncio.get_event_loop().time()
                 rows = _parse_rows(msg.value)
-                ROWS_PROCESSED.inc(len(rows))
                 if rows:
                     clickhouse.ensure_table(
                         model_id, {c: "String" for c in rows[0].keys()}
                     )
                     clickhouse.insert_rows(model_id, rows)
-                    ROWS_INSERTED.inc(len(rows))
                     logger.info(
                         "Inserted %d rows into data_%s", len(rows), model_id
                     )
-                PROCESSING_TIME.observe(asyncio.get_event_loop().time() - start)
+                
             except Exception as exc:
                 logger.error("Processing failed: %s", exc)
                 await producer.send_and_wait(dlq_topic, msg.value)
-                DLQ_EVENTS.inc()
     finally:
         await consumer.stop()
         await producer.stop()
@@ -91,8 +72,6 @@ async def consume(job_id: str, model_id: str) -> None:
 
 def main(job_id: str = "testjob", model_id: str = "model") -> None:
     """Entry point for the worker."""
-    metrics_port = int(os.environ.get("METRICS_PORT", "9090"))
-    start_http_server(metrics_port)
     asyncio.run(consume(job_id, model_id))
 
 
