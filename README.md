@@ -33,7 +33,11 @@ The API will be available at `http://localhost:8000`, Redpanda at `localhost:909
 Create a simple JSON schema and save it as `model.json`:
 
 ```json
-{"event_id": "String", "timestamp": "UInt32", "amount": "Float64"}
+{
+  "event_id": "String",
+  "timestamp": "UInt32",
+  "amount": "Float64"
+}
 ```
 
 Register the model and note the returned `model_id`:
@@ -45,7 +49,11 @@ batch model create purchases model.json
 Sample output:
 
 ```text
-{"id": "a1b2c3d4", "name": "purchases", "schema": "{\"event_id\": \"String\", \"timestamp\": \"UInt32\", \"amount\": \"Float64\"}"}
+{
+  "id": "a1b2c3d4",
+  "name": "purchases",
+  "schema": "{\n  \"event_id\": \"String\",\n  \"timestamp\": \"UInt32\",\n  \"amount\": \"Float64\"\n}"
+}
 ```
 
 ### 3. Ingest valid data

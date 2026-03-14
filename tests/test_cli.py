@@ -5,6 +5,12 @@ from batch import cli
 
 
 class CliTests(unittest.TestCase):
+    @mock.patch("batch.cli.typer.echo")
+    def test_echo_json_pretty_prints_output(self, mock_echo):
+        cli._echo_json({"id": "a1b2c3d4"})
+
+        mock_echo.assert_called_once_with('{\n  "id": "a1b2c3d4"\n}')
+
     def test_progress_bar_complete(self):
         bar = cli._progress_bar(100, 100, "SUCCESS")
         self.assertEqual(bar, "[#################]")

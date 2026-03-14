@@ -21,7 +21,13 @@ batch model list
 Sample output:
 
 ```text
-[{"id": "a1b2c3d4", "name": "purchases", "schema": "{\"event_id\":\"String\",\"timestamp\":\"UInt32\",\"amount\":\"Float64\"}"}]
+[
+  {
+    "id": "a1b2c3d4",
+    "name": "purchases",
+    "schema": "{\"event_id\": \"String\", \"timestamp\": \"UInt32\", \"amount\": \"Float64\"}"
+  }
+]
 ```
 
 ### `model describe <model_id>`
@@ -37,7 +43,11 @@ batch model create purchases model.json
 Sample output:
 
 ```text
-{"id": "a1b2c3d4", "name": "purchases", "schema": "{\"event_id\":\"String\",\"timestamp\":\"UInt32\",\"amount\":\"Float64\"}"}
+{
+  "id": "a1b2c3d4",
+  "name": "purchases",
+  "schema": "{\"event_id\": \"String\", \"timestamp\": \"UInt32\", \"amount\": \"Float64\"}"
+}
 ```
 
 ### `model update <model_id> <schema.json>`

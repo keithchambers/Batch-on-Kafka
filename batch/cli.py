@@ -25,7 +25,7 @@ def _request(method: str, path: str, **kwargs) -> requests.Response:
 
 
 def _echo_json(payload: Any) -> None:
-    typer.echo(json.dumps(payload))
+    typer.echo(json.dumps(payload, indent=2))
 
 
 def _error_text(response: requests.Response) -> str:
