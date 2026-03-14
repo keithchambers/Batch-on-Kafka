@@ -1,11 +1,10 @@
 # Kafka Topics
 
-The system uses Redpanda as the Kafka broker. Topics are created dynamically per job and retain data for a limited time.
+The system uses Redpanda as the Kafka broker. Topics are created per job.
 
-| Purpose | Name | Partitions | Cleanup | Retention |
-|---------|------|-----------|---------|-----------|
-| Job metadata | `batch.jobs` | 3 | compact | infinite |
-| Per-job data | `batch.<job_id>` | 6 | delete | 1 day (configurable via `RETENTION_HOURS`) |
-| Per-job dead-letter | `batch.<job_id>.dlq` | 6 | delete | 1 day (same as above) |
+| Purpose | Name | Producer | Consumer |
+|---------|------|----------|----------|
+| Job payload | `batch.<job_id>` | API | Worker subscription pattern `^batch\.[^.]+$` |
+| Dead-letter payload | `batch.<job_id>.dlq` | Worker | none in this repository |
 
-A compacted topic `batch.models` stores model schemas so both services can reload them on startup.
+The application does not publish model metadata or job status events to shared Kafka topics. Job status lives in the API process and rejected row details are stored in ClickHouse.

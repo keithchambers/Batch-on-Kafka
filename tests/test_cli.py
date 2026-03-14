@@ -1,4 +1,6 @@
 import unittest
+from unittest import mock
+
 from batch import cli
 
 
@@ -20,7 +22,20 @@ class CliTests(unittest.TestCase):
         self.assertRegex(out, r"100%")
         self.assertIn("00:01", out)
         self.assertIn("00:02", out)
+        self.assertIn("PROCESSING", out)
 
+    def test_error_text_prefers_json_detail(self):
+        response = mock.Mock()
+        response.json.return_value = {"detail": "Model not found"}
+        response.text = '{"detail":"Model not found"}'
+        response.status_code = 404
 
-if __name__ == "__main__":
-    unittest.main()
+        self.assertEqual(cli._error_text(response), "Model not found")
+
+    def test_error_text_falls_back_to_status_code(self):
+        response = mock.Mock()
+        response.json.side_effect = ValueError("not json")
+        response.text = ""
+        response.status_code = 503
+
+        self.assertEqual(cli._error_text(response), "request failed with status 503")

@@ -66,6 +66,17 @@ class WorkerTests(unittest.TestCase):
 
         self.assertFalse(worker._job_is_cancelled("job123"))
 
+    @mock.patch("batch.worker.logger.exception")
+    @mock.patch("batch.worker.requests.get", side_effect=RuntimeError("boom"))
+    def test_job_is_cancelled_or_false_returns_false_when_lookup_fails(
+        self,
+        mock_get,
+        mock_log_exception,
+    ):
+        self.assertFalse(worker._job_is_cancelled_or_false("job123"))
+        mock_get.assert_called_once()
+        mock_log_exception.assert_called_once()
+
     def test_processing_delay_applies_cancellation_grace_window(self):
         self.assertEqual(worker._processing_delay_ms(1_000, 1_100), 400)
         self.assertEqual(worker._processing_delay_ms(1_000, 1_500), 0)

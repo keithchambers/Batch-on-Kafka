@@ -14,13 +14,11 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-The `batch` command is now available and can also be invoked with
-`python -m batch`.
+The CLI is available as `batch` and can also be invoked with `python -m batch`.
 
 ## Quick Start
 
-Follow these steps to see the system handle a successful upload (the "happy"
-path) and a file with bad data that results in rejected rows.
+Follow these steps to run a valid upload and a file that produces rejected rows.
 
 ### 1. Start the stack
 
@@ -81,7 +79,7 @@ batch job status <job_id>
 Sample output:
 
 ```text
-JOB      MODEL       STATE           TOTAL   OK      ERRORS  PROGRESS      WAITING  PROCESSSING
+JOB      MODEL       STATE           TOTAL   OK      ERRORS  PROGRESS      WAITING  PROCESSING
 abcd1234 purchases   SUCCESS               2       2       0 [#################] 100%   00:00        00:02
 ```
 
@@ -95,7 +93,7 @@ Sample output:
 
 ```text
 1\t1716045542\t12.5
-2\t1716045543\t8.0
+2\t1716045543\t8
 ```
 
 ### 4. Rejected data path
@@ -122,7 +120,8 @@ Sample output:
 
 ```text
 ROW,EVENT_ID,COLUMN,TYPE,ERROR,OBSERVED,MESSAGE
-1,1001abcd,timestamp,TIMESTAMP,MISSING_COLUMN,,"The required column 'timestamp' is missing"
+2,4,amount,Float64,MISSING_COLUMN,,"The required column 'amount' is missing"
+2,4,timestamp,UInt32,INVALID_UINT32,bad,The value for 'timestamp' must be an unsigned 32-bit integer
 ```
 
 Rejected rows are also stored in ClickHouse and can be queried directly:
@@ -134,7 +133,7 @@ curl "http://localhost:8123/?user=default&password=batchlocal&query=SELECT%20*%2
 Sample output:
 
 ```text
-<job_id>\t1001abcd\ttimestamp\tMISSING_COLUMN
+<job_id>\t2\t4\tamount\tMISSING_COLUMN
 ```
 
 ## Local Development
@@ -143,9 +142,11 @@ Use the CLI via `batch` or `python -m batch`. Set environment variables if runni
 
 ```bash
 export BATCH_API_URL=http://localhost:8000
+export BATCH_API_TIMEOUT_SECONDS=30
 export KAFKA_BOOTSTRAP=localhost:9092
 export CLICKHOUSE_HOST=localhost
 export CLICKHOUSE_PORT=8123
+export CLICKHOUSE_USER=default
 export CLICKHOUSE_PASSWORD=batchlocal
 ```
 
@@ -164,7 +165,7 @@ the same suite when `BATCH_E2E=1` is set and the local stack is running.
 
 ```bash
 pip install ruff
-ruff batch tests
+ruff check batch tests
 python -m unittest discover -s tests
 
 docker-compose up --build -d

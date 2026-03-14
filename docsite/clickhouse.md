@@ -11,7 +11,7 @@ Use `default` / `batchlocal` when querying it from the host.
 CREATE TABLE data_<model_id> (
     event_id String,
     timestamp UInt32,
-    -- additional attributes depending on the model schema
+    amount Float64
 ) ENGINE = MergeTree
 ORDER BY (event_id);
 
@@ -29,3 +29,9 @@ CREATE TABLE rejected_rows (
 ) ENGINE = MergeTree
 ORDER BY (job_id, row);
 ```
+
+Notes:
+
+- Per-model tables are created lazily by the worker the first time accepted rows are written.
+- The ordering key is `event_id` when that column exists; otherwise the first schema column is used.
+- Rejected rows are written one record per validation error, so a single source row can produce multiple entries.

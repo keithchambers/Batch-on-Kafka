@@ -4,9 +4,9 @@ This documentation describes the PoC for batching data into analytics storage us
 
 ## Overview
 
-- **Redpanda** provides the Kafka API broker used for job data and model metadata.
-- **ClickHouse** stores validated rows and rejected rows for analytical queries.
-- The API service accepts file uploads and streams rows to Redpanda.
-- A background worker consumes each job's topic, validates rows against the registered model schema, and inserts good rows into ClickHouse.
+- **Redpanda** provides the Kafka-compatible broker used for per-job ingestion payloads and dead-letter messages.
+- **ClickHouse** stores validated rows in per-model tables plus rejected row details in a shared table.
+- The API service accepts file uploads, tracks model and job state in memory, and publishes one Kafka message per submitted job.
+- A background worker subscribes to job topics, validates rows against the submitted schema, writes accepted rows to ClickHouse, and reports job status back to the API.
 
 See the other pages in this documentation for CLI usage, REST API details, Kafka topics, and message schemas.

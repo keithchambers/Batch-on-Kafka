@@ -1,16 +1,49 @@
+import json
 import os
 from typing import List, Dict, Any
 
-import typer
 import requests
+import typer
 
 API_URL = os.environ.get("BATCH_API_URL", "http://localhost:8000")
+API_TIMEOUT_SECONDS = float(os.environ.get("BATCH_API_TIMEOUT_SECONDS", "30"))
 
 app = typer.Typer()
 model_app = typer.Typer(name="model")
 job_app = typer.Typer(name="job")
 app.add_typer(model_app)
 app.add_typer(job_app)
+
+
+def _request(method: str, path: str, **kwargs) -> requests.Response:
+    kwargs.setdefault("timeout", API_TIMEOUT_SECONDS)
+    try:
+        return requests.request(method, f"{API_URL}{path}", **kwargs)
+    except requests.RequestException as exc:
+        typer.echo(f"request failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+def _echo_json(payload: Any) -> None:
+    typer.echo(json.dumps(payload))
+
+
+def _error_text(response: requests.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+
+    if isinstance(payload, dict) and payload.get("detail"):
+        return str(payload["detail"])
+    if response.text.strip():
+        return response.text.strip()
+    return f"request failed with status {response.status_code}"
+
+
+def _exit_for_response(response: requests.Response) -> None:
+    typer.echo(_error_text(response), err=True)
+    raise typer.Exit(code=1)
 
 
 def _ms_to_time(ms: int) -> str:
@@ -36,7 +69,7 @@ def _progress_bar(ok: int, total: int, state: str, width: int = 17) -> str:
 
 
 def _format_jobs(jobs: List[Dict[str, Any]]) -> str:
-    header = "JOB      MODEL       STATE           TOTAL   OK      ERRORS  PROGRESS      WAITING  PROCESSSING"
+    header = "JOB      MODEL       STATE           TOTAL   OK      ERRORS  PROGRESS      WAITING  PROCESSING"
     lines = [header]
     for job in jobs:
         total = job.get("totals", {}).get("rows", 0)
@@ -66,78 +99,85 @@ def _format_jobs(jobs: List[Dict[str, Any]]) -> str:
 
 @model_app.command("list")
 def model_list():
-    r = requests.get(f"{API_URL}/models")
-    typer.echo(r.json())
+    response = _request("GET", "/models")
+    if response.status_code != 200:
+        _exit_for_response(response)
+    _echo_json(response.json())
 
 
 @model_app.command("describe")
 def model_describe(model_id: str):
-    r = requests.get(f"{API_URL}/models/{model_id}")
-    typer.echo(r.json())
+    response = _request("GET", f"/models/{model_id}")
+    if response.status_code != 200:
+        _exit_for_response(response)
+    _echo_json(response.json())
 
 
 @model_app.command("create")
 def model_create(name: str, schema: str):
-    with open(schema) as f:
+    with open(schema, encoding="utf-8") as f:
         schema_data = f.read()
-    r = requests.post(f"{API_URL}/models", json={"name": name, "schema": schema_data})
-    typer.echo(r.json())
+    response = _request("POST", "/models", json={"name": name, "schema": schema_data})
+    if response.status_code != 201:
+        _exit_for_response(response)
+    _echo_json(response.json())
 
 
 @model_app.command("update")
 def model_update(model_id: str, schema: str):
-    with open(schema) as f:
+    with open(schema, encoding="utf-8") as f:
         schema_data = f.read()
-    r = requests.put(f"{API_URL}/models/{model_id}", json={"schema": schema_data})
-    typer.echo(r.json())
+    response = _request("PUT", f"/models/{model_id}", json={"schema": schema_data})
+    if response.status_code != 200:
+        _exit_for_response(response)
+    _echo_json(response.json())
 
 
 @model_app.command("delete")
 def model_delete(model_id: str):
-    r = requests.delete(f"{API_URL}/models/{model_id}")
-    typer.echo(r.status_code)
+    response = _request("DELETE", f"/models/{model_id}")
+    if response.status_code != 204:
+        _exit_for_response(response)
+    typer.echo("204")
 
 
 @job_app.command("list")
 def job_list():
-    r = requests.get(f"{API_URL}/jobs")
-    typer.echo(_format_jobs(r.json()))
+    response = _request("GET", "/jobs")
+    if response.status_code != 200:
+        _exit_for_response(response)
+    typer.echo(_format_jobs(response.json()))
 
 
 @job_app.command("create")
 def job_create(model_id: str, data_file: str):
     with open(data_file, "rb") as f:
         files = {"file": (os.path.basename(data_file), f)}
-        r = requests.post(f"{API_URL}/jobs", params={"model_id": model_id}, files=files)
-    if r.status_code == 202:
-        typer.echo(f"job {r.json().get('job_id')} created.")
-    else:
-        typer.echo(r.text)
+        response = _request("POST", "/jobs", params={"model_id": model_id}, files=files)
+    if response.status_code != 202:
+        _exit_for_response(response)
+    typer.echo(f"job {response.json().get('job_id')} created.")
 
 
 @job_app.command("status")
 def job_status(job_id: str):
-    r = requests.get(f"{API_URL}/jobs/{job_id}")
-    if r.status_code == 200:
-        typer.echo(_format_jobs([r.json()]))
-    else:
-        typer.echo(r.text)
+    response = _request("GET", f"/jobs/{job_id}")
+    if response.status_code != 200:
+        _exit_for_response(response)
+    typer.echo(_format_jobs([response.json()]))
 
 
 @job_app.command("cancel")
 def job_cancel(job_id: str):
-    r = requests.delete(f"{API_URL}/jobs/{job_id}")
-    if r.status_code == 202:
-        typer.echo(f"job {job_id} cancelled")
-    else:
-        typer.echo(r.text)
+    response = _request("DELETE", f"/jobs/{job_id}")
+    if response.status_code != 202:
+        _exit_for_response(response)
+    typer.echo(f"job {job_id} cancelled")
 
 
 @job_app.command("rejected")
 def job_rejected(job_id: str):
-    r = requests.get(f"{API_URL}/jobs/{job_id}/rejected")
-    typer.echo(r.text)
-
-
-if __name__ == "__main__":
-    app()
+    response = _request("GET", f"/jobs/{job_id}/rejected")
+    if response.status_code != 200:
+        _exit_for_response(response)
+    typer.echo(response.text)

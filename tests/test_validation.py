@@ -46,7 +46,3 @@ class ValidationTests(unittest.TestCase):
                 f.write("data")
             with self.assertRaises(HTTPException):
                 _peek_validate(p, ".txt")
-
-
-if __name__ == "__main__":
-    unittest.main()

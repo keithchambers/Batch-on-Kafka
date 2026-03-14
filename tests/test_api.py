@@ -1,5 +1,7 @@
 import unittest
 
+from fastapi import HTTPException
+
 from batch import api
 
 
@@ -34,3 +36,17 @@ class ApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 204)
         self.assertNotIn("abcd1234", api.MODELS)
+
+    def test_create_model_rejects_invalid_schema(self):
+        with self.assertRaises(HTTPException):
+            api.create_model({"name": "purchases", "schema": "[]"})
+
+    def test_update_model_rejects_invalid_schema(self):
+        api.MODELS["abcd1234"] = {
+            "id": "abcd1234",
+            "name": "purchases",
+            "schema": "{\"event_id\":\"String\"}",
+        }
+
+        with self.assertRaises(HTTPException):
+            api.update_model("abcd1234", {"schema": "not-json"})

@@ -1,4 +1,3 @@
-import ast
 import json
 import os
 import re
@@ -69,8 +68,8 @@ class CliE2ETests(unittest.TestCase):
             )
         return proc.stdout.strip()
 
-    def _literal_output(self, *args: str):
-        return ast.literal_eval(self._run_cli(*args))
+    def _json_output(self, *args: str):
+        return json.loads(self._run_cli(*args))
 
     def _write_file(self, directory: str, name: str, content: str) -> str:
         path = Path(directory, name)
@@ -130,21 +129,21 @@ class CliE2ETests(unittest.TestCase):
             )
 
             try:
-                initial_models = self._literal_output("model", "list")
+                initial_models = self._json_output("model", "list")
                 self.assertIsInstance(initial_models, list)
 
-                created_model = self._literal_output("model", "create", model_name, schema_path)
+                created_model = self._json_output("model", "create", model_name, schema_path)
                 model_id = created_model["id"]
                 self.assertEqual(created_model["name"], model_name)
 
-                listed_models = self._literal_output("model", "list")
+                listed_models = self._json_output("model", "list")
                 self.assertIn(model_id, {model["id"] for model in listed_models})
 
-                described_model = self._literal_output("model", "describe", model_id)
+                described_model = self._json_output("model", "describe", model_id)
                 self.assertEqual(described_model["id"], model_id)
                 self.assertEqual(described_model["schema"], json.dumps(schema, separators=(",", ":")))
 
-                updated_model = self._literal_output("model", "update", model_id, updated_schema_path)
+                updated_model = self._json_output("model", "update", model_id, updated_schema_path)
                 self.assertEqual(
                     updated_model["schema"],
                     json.dumps(schema, indent=2, sort_keys=True),
@@ -228,7 +227,7 @@ class CliE2ETests(unittest.TestCase):
                 self.assertEqual(delete_output, "204")
                 model_id = None
 
-                remaining_models = self._literal_output("model", "list")
+                remaining_models = self._json_output("model", "list")
                 self.assertNotIn(model_name, {model["name"] for model in remaining_models})
             finally:
                 if model_id:

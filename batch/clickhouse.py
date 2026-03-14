@@ -3,12 +3,23 @@ from typing import Dict, Any, Iterable
 
 import clickhouse_connect
 
+from .log_config import configure_logging
+
 CLICKHOUSE_HOST = os.environ.get("CLICKHOUSE_HOST", "clickhouse")
 CLICKHOUSE_PORT = int(os.environ.get("CLICKHOUSE_PORT", 8123))
 CLICKHOUSE_USER = os.environ.get("CLICKHOUSE_USER", "default")
 CLICKHOUSE_PASSWORD = os.environ.get("CLICKHOUSE_PASSWORD", "")
 
 _client = None
+logger = configure_logging(__name__)
+
+
+def _quote_identifier(identifier: str) -> str:
+    return f"`{identifier.replace('`', '``')}`"
+
+
+def _data_table_name(model_id: str) -> str:
+    return f"data_{model_id}"
 
 
 def get_client():
@@ -22,6 +33,12 @@ def get_client():
         if CLICKHOUSE_PASSWORD:
             kwargs["password"] = CLICKHOUSE_PASSWORD
         _client = clickhouse_connect.get_client(**kwargs)
+        logger.info(
+            "clickhouse_client_ready host=%s port=%s user=%s",
+            CLICKHOUSE_HOST,
+            CLICKHOUSE_PORT,
+            CLICKHOUSE_USER,
+        )
     return _client
 
 
@@ -29,17 +46,22 @@ def ensure_table(model_id: str, columns: Dict[str, str]) -> None:
     """Create per-model table if it does not already exist."""
     if not columns:
         return
-    cols = ", ".join(f"{name} {dtype}" for name, dtype in columns.items())
+    cols = ", ".join(f"{_quote_identifier(name)} {dtype}" for name, dtype in columns.items())
     if "event_id" in columns:
-        order_by = "event_id"
+        order_by = _quote_identifier("event_id")
     else:
-        order_by = next(iter(columns))
+        order_by = _quote_identifier(next(iter(columns)))
     ddl = (
-        f"CREATE TABLE IF NOT EXISTS data_{model_id} ({cols}) "
+        f"CREATE TABLE IF NOT EXISTS {_quote_identifier(_data_table_name(model_id))} ({cols}) "
         f"ENGINE = MergeTree ORDER BY ({order_by})"
     )
     client = get_client()
     client.command(ddl)
+    logger.info(
+        "clickhouse_table_ready table=%s column_count=%d",
+        _data_table_name(model_id),
+        len(columns),
+    )
 
 
 def insert_rows(model_id: str, rows: Iterable[Dict[str, Any]]) -> None:
@@ -49,7 +71,12 @@ def insert_rows(model_id: str, rows: Iterable[Dict[str, Any]]) -> None:
     columns = list(rows_list[0].keys())
     values = [[row[column] for column in columns] for row in rows_list]
     client = get_client()
-    client.insert(f"data_{model_id}", values, column_names=columns)
+    client.insert(_data_table_name(model_id), values, column_names=columns)
+    logger.info(
+        "clickhouse_rows_inserted table=%s row_count=%d",
+        _data_table_name(model_id),
+        len(rows_list),
+    )
 
 
 def ensure_rejected_table() -> None:
@@ -69,6 +96,7 @@ def ensure_rejected_table() -> None:
     """
     client = get_client()
     client.command(ddl)
+    logger.info("clickhouse_table_ready table=rejected_rows column_count=9")
 
 
 def insert_rejected_rows(job_id: str, rows: Iterable[Dict[str, Any]]) -> None:
@@ -91,3 +119,4 @@ def insert_rejected_rows(job_id: str, rows: Iterable[Dict[str, Any]]) -> None:
     values = [[row[column] for column in columns] for row in payload]
     client = get_client()
     client.insert("rejected_rows", values, column_names=columns)
+    logger.info("clickhouse_rejected_rows_inserted job_id=%s row_count=%d", job_id, len(payload))

@@ -3,7 +3,6 @@ import base64
 import csv
 import io
 import json
-import logging
 import os
 import time
 from typing import Any, Dict, List, Tuple
@@ -13,13 +12,17 @@ import requests
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 
 from . import clickhouse
+from .log_config import configure_logging
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = configure_logging(__name__)
 
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "redpanda:9092")
 API_URL = os.environ.get("BATCH_API_URL", "http://api:8000")
 CANCELLATION_GRACE_MS = int(os.environ.get("BATCH_CANCELLATION_GRACE_MS", "500"))
+JOB_UPDATE_RETRIES = int(os.environ.get("BATCH_JOB_UPDATE_RETRIES", "3"))
+JOB_UPDATE_RETRY_DELAY_MS = int(os.environ.get("BATCH_JOB_UPDATE_RETRY_DELAY_MS", "500"))
+WORKER_GROUP_ID = "batch-worker"
+JOB_TOPIC_PATTERN = r"^batch\.[^.]+$"
 
 
 def _parse_rows(data: bytes, filename: str) -> List[Dict[str, Any]]:
@@ -175,8 +178,27 @@ def _job_update(
 
 
 def _update_job(job_id: str, payload: Dict[str, Any]) -> None:
-    response = requests.put(f"{API_URL}/internal/jobs/{job_id}", json=payload, timeout=10)
-    response.raise_for_status()
+    last_error: Exception | None = None
+    for attempt in range(1, JOB_UPDATE_RETRIES + 1):
+        try:
+            response = requests.put(f"{API_URL}/internal/jobs/{job_id}", json=payload, timeout=10)
+            response.raise_for_status()
+            return
+        except Exception as exc:
+            last_error = exc
+            if attempt == JOB_UPDATE_RETRIES:
+                break
+            logger.warning(
+                "job_status_update_retry job_id=%s attempt=%d max_attempts=%d error=%s",
+                job_id,
+                attempt,
+                JOB_UPDATE_RETRIES,
+                exc,
+            )
+            time.sleep(JOB_UPDATE_RETRY_DELAY_MS / 1000)
+
+    if last_error is not None:
+        raise last_error
 
 
 def _get_job_state(job_id: str) -> str:
@@ -189,6 +211,14 @@ def _job_is_cancelled(job_id: str) -> bool:
     return _get_job_state(job_id) == "CANCELLED"
 
 
+def _job_is_cancelled_or_false(job_id: str) -> bool:
+    try:
+        return _job_is_cancelled(job_id)
+    except Exception:
+        logger.exception("job_state_lookup_failed job_id=%s", job_id)
+        return False
+
+
 def _processing_delay_ms(created_at_ms: int, now_ms: int) -> int:
     ready_at_ms = created_at_ms + CANCELLATION_GRACE_MS
     return max(0, ready_at_ms - now_ms)
@@ -198,50 +228,87 @@ async def _start(client) -> None:
     while True:
         try:
             await client.start()
+            logger.info(
+                "kafka_client_ready client=%s bootstrap_servers=%s",
+                type(client).__name__,
+                KAFKA_BOOTSTRAP,
+            )
             break
         except Exception as exc:
-            logger.warning("Kafka connect failed: %s. Retrying...", exc)
+            logger.warning(
+                "kafka_client_connect_failed client=%s bootstrap_servers=%s error=%s",
+                type(client).__name__,
+                KAFKA_BOOTSTRAP,
+                exc,
+            )
             await asyncio.sleep(5)
 
 
 async def consume() -> None:
     """Consume all job topics and insert rows into ClickHouse."""
+    logger.info(
+        "worker_starting kafka_bootstrap=%s api_url=%s group_id=%s cancellation_grace_ms=%d",
+        KAFKA_BOOTSTRAP,
+        API_URL,
+        WORKER_GROUP_ID,
+        CANCELLATION_GRACE_MS,
+    )
     consumer = AIOKafkaConsumer(
         bootstrap_servers=KAFKA_BOOTSTRAP,
-        group_id="batch-worker",
+        group_id=WORKER_GROUP_ID,
         auto_offset_reset="earliest",
         metadata_max_age_ms=1000,
     )
-    consumer.subscribe(pattern=r"^batch\.[^.]+$")
+    consumer.subscribe(pattern=JOB_TOPIC_PATTERN)
     producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP)
     await _start(consumer)
     await _start(producer)
+    logger.info("worker_subscribed topic_pattern=%s", JOB_TOPIC_PATTERN)
 
     try:
         async for msg in consumer:
             job_id = ""
+            model_id = ""
             started_at_ms = int(time.time() * 1000)
+            persisted = False
             try:
                 payload = _decode_job_message(msg.value)
                 job_id = payload["job_id"]
+                model_id = payload["model_id"]
+                filename = payload["filename"]
+                logger.info(
+                    "job_received job_id=%s model_id=%s topic=%s partition=%s offset=%s filename=%s",
+                    job_id,
+                    model_id,
+                    msg.topic,
+                    msg.partition,
+                    msg.offset,
+                    filename,
+                )
                 created_at_ms = int(payload.get("created_at_ms", started_at_ms))
                 delay_ms = _processing_delay_ms(created_at_ms, started_at_ms)
                 if delay_ms:
+                    logger.info("job_waiting job_id=%s delay_ms=%d", job_id, delay_ms)
                     await asyncio.sleep(delay_ms / 1000)
                 if await asyncio.to_thread(_job_is_cancelled, job_id):
-                    logger.info("Skipping cancelled job %s before processing", job_id)
+                    logger.info("job_skipped_cancelled job_id=%s phase=preprocess", job_id)
                     continue
-                model_id = payload["model_id"]
                 schema = _load_schema(payload["schema"])
-                rows = _parse_rows(payload["file_bytes"], payload["filename"])
+                rows = _parse_rows(payload["file_bytes"], filename)
                 processing_started_at_ms = int(time.time() * 1000)
-                waiting_ms = max(
-                    0, processing_started_at_ms - created_at_ms
-                )
+                waiting_ms = max(0, processing_started_at_ms - created_at_ms)
                 valid_rows, rejected_rows, invalid_row_count = _validate_rows(rows, schema)
+                logger.info(
+                    "job_validated job_id=%s model_id=%s total_rows=%d valid_rows=%d invalid_rows=%d",
+                    job_id,
+                    model_id,
+                    len(rows),
+                    len(valid_rows),
+                    invalid_row_count,
+                )
 
                 if await asyncio.to_thread(_job_is_cancelled, job_id):
-                    logger.info("Skipping cancelled job %s before persistence", job_id)
+                    logger.info("job_skipped_cancelled job_id=%s phase=persistence", job_id)
                     continue
 
                 if valid_rows:
@@ -250,6 +317,14 @@ async def consume() -> None:
                 if rejected_rows:
                     clickhouse.ensure_rejected_table()
                     clickhouse.insert_rejected_rows(job_id, rejected_rows)
+                persisted = True
+                logger.info(
+                    "job_persisted job_id=%s model_id=%s inserted_rows=%d rejected_records=%d",
+                    job_id,
+                    model_id,
+                    len(valid_rows),
+                    len(rejected_rows),
+                )
 
                 processing_ms = max(0, int(time.time() * 1000) - started_at_ms)
                 if invalid_row_count == 0:
@@ -272,15 +347,41 @@ async def consume() -> None:
                         rejected_rows=rejected_rows,
                     ),
                 )
-                logger.info("Processed job %s with state %s", job_id, state)
+                logger.info(
+                    "job_completed job_id=%s model_id=%s state=%s total_rows=%d ok_rows=%d error_rows=%d waiting_ms=%d processing_ms=%d",
+                    job_id,
+                    model_id,
+                    state,
+                    len(rows),
+                    len(valid_rows),
+                    invalid_row_count,
+                    waiting_ms,
+                    processing_ms,
+                )
+            except requests.RequestException:
+                logger.exception(
+                    "job_status_sync_failed job_id=%s model_id=%s persisted=%s",
+                    job_id or "unknown",
+                    model_id or "unknown",
+                    persisted,
+                )
+                continue
             except Exception as exc:
-                logger.exception("Processing failed: %s", exc)
+                logger.exception(
+                    "job_processing_failed job_id=%s topic=%s partition=%s offset=%s",
+                    job_id or "unknown",
+                    msg.topic,
+                    msg.partition,
+                    msg.offset,
+                )
                 if job_id:
-                    if await asyncio.to_thread(_job_is_cancelled, job_id):
-                        logger.info("Skipping failure handling for cancelled job %s", job_id)
+                    if await asyncio.to_thread(_job_is_cancelled_or_false, job_id):
+                        logger.info("job_skipped_cancelled job_id=%s phase=failure", job_id)
                         continue
                     processing_ms = max(0, int(time.time() * 1000) - started_at_ms)
-                    await producer.send_and_wait(f"batch.{job_id}.dlq", msg.value)
+                    dlq_topic = f"batch.{job_id}.dlq"
+                    await producer.send_and_wait(dlq_topic, msg.value)
+                    logger.info("job_sent_to_dlq job_id=%s topic=%s", job_id, dlq_topic)
                     try:
                         await asyncio.to_thread(
                             _update_job,
@@ -297,10 +398,11 @@ async def consume() -> None:
                             ),
                         )
                     except Exception:
-                        logger.exception("Failed to update job %s in API", job_id)
+                        logger.exception("job_status_update_failed job_id=%s state=FAILED", job_id)
     finally:
         await consumer.stop()
         await producer.stop()
+        logger.info("worker_stopped")
 
 
 def main() -> None:
