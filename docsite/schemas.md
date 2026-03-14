@@ -12,12 +12,12 @@
 }
 ```
 
-## Data Row (`/batch/<job_id>`)
+## Data Row (`batch.<job_id>`)
 ```json
 {"offset": 0, "payload": "<raw-csv-or-parquet-row-as-bytes>"}
 ```
 
-## Dead-Letter Row (`/batch/<job_id>/dlq`)
+## Dead-Letter Row (`batch.<job_id>.dlq`)
 ```json
 {
   "row": 1,

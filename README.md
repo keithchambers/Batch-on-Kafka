@@ -88,7 +88,7 @@ abcd1234 purchases   SUCCESS               2       2       0 [#################]
 Query ClickHouse to view the inserted rows:
 
 ```bash
-curl "http://localhost:8123/?query=SELECT%20*%20FROM%20data_<model_id>"
+curl "http://localhost:8123/?user=default&password=batchlocal&query=SELECT%20*%20FROM%20data_<model_id>"
 ```
 
 Sample output:
@@ -128,7 +128,7 @@ ROW,EVENT_ID,COLUMN,TYPE,ERROR,OBSERVED,MESSAGE
 Rejected rows are also stored in ClickHouse and can be queried directly:
 
 ```bash
-curl "http://localhost:8123/?query=SELECT%20*%20FROM%20rejected_rows%20WHERE%20job_id='<job_id>'"
+curl "http://localhost:8123/?user=default&password=batchlocal&query=SELECT%20*%20FROM%20rejected_rows%20WHERE%20job_id='<job_id>'"
 ```
 
 Sample output:
@@ -146,6 +146,7 @@ export BATCH_API_URL=http://localhost:8000
 export KAFKA_BOOTSTRAP=localhost:9092
 export CLICKHOUSE_HOST=localhost
 export CLICKHOUSE_PORT=8123
+export CLICKHOUSE_PASSWORD=batchlocal
 ```
 
 Start the services locally without Docker using:
@@ -157,14 +158,17 @@ python -m batch.worker          # background worker
 
 ### Linting and Tests
 
-Install development dependencies and run the linter and test suite:
+Install development dependencies and run the linter and test suite. Unit tests
+run with the default command. Live end-to-end CLI coverage is available through
+the same suite when `BATCH_E2E=1` is set and the local stack is running.
 
 ```bash
 pip install ruff
 ruff batch tests
 python -m unittest discover -s tests
+
+docker-compose up --build -d
+BATCH_E2E=1 python -m unittest discover -s tests
 ```
 
 See [docsite](./docsite) for detailed API and schema information.
-
-
