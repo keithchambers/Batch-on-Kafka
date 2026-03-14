@@ -9,5 +9,8 @@ version = "0.1.0"
 [project.scripts]
 batch = "batch.cli:app"
 
+[tool.setuptools]
+packages = ["batch"]
+
 [tool.ruff]
 line-length = 100

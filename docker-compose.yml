@@ -1,17 +1,35 @@
 services:
 
   redpanda:
-    image: docker.redpanda.com/redpanda/redpanda:latest
-    command: ["redpanda", "start", "--smp", "1", "--reserve-memory", "0M", "--overprovisioned"]
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    command:
+      [
+        "redpanda",
+        "start",
+        "--smp",
+        "1",
+        "--reserve-memory",
+        "0M",
+        "--overprovisioned",
+        "--check=false",
+        "--node-id",
+        "0",
+        "--kafka-addr",
+        "PLAINTEXT://0.0.0.0:9092",
+        "--advertise-kafka-addr",
+        "PLAINTEXT://redpanda:9092"
+      ]
     ports:
       - "9092:9092"
       
   clickhouse:
     image: clickhouse/clickhouse-server:latest
+    volumes:
+      - ./clickhouse/default-user.xml:/etc/clickhouse-server/users.d/default-user.xml:ro
     ports:
       - "8123:8123"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8123/ping"]
+      test: ["CMD", "clickhouse-client", "--user", "default", "--password", "batchlocal", "--query", "SELECT 1"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -30,7 +48,8 @@ services:
     build: .
     command: python -m batch.worker
     environment:
+      - BATCH_API_URL=http://api:8000
       - KAFKA_BOOTSTRAP=redpanda:9092
       - CLICKHOUSE_HOST=clickhouse
-
-
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=batchlocal

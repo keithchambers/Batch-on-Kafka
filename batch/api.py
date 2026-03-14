@@ -1,14 +1,18 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, status, Request
-from fastapi.responses import JSONResponse, StreamingResponse
-from uuid import uuid4
-import os
-import csv
 import asyncio
+import base64
+import csv
+import io
+import json
 import logging
-from typing import Dict, Any, Optional
+import os
+import time
+from typing import Any, Dict, Optional
+from uuid import uuid4
 
 import pyarrow.parquet as pq
 from aiokafka import AIOKafkaProducer
+from fastapi import FastAPI, File, HTTPException, Response, UploadFile, status
+from fastapi.responses import StreamingResponse
 
 app = FastAPI()
 
@@ -17,18 +21,47 @@ JOBS: Dict[str, Dict[str, Any]] = {}
 MAX_FILE_SIZE = 1 * 1024 * 1024 * 1024  # 1GB
 KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "redpanda:9092")
 _producer: Optional[AIOKafkaProducer] = None
+_producer_started = False
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def _job_topic(job_id: str) -> str:
+    return f"batch.{job_id}"
+
+
+def _encode_job_message(
+    job_id: str,
+    model_id: str,
+    schema: str,
+    filename: str,
+    contents: bytes,
+    created_at_ms: int,
+) -> bytes:
+    return json.dumps(
+        {
+            "job_id": job_id,
+            "model_id": model_id,
+            "schema": schema,
+            "filename": filename,
+            "created_at_ms": created_at_ms,
+            "payload_b64": base64.b64encode(contents).decode("ascii"),
+        }
+    ).encode("utf-8")
+
+
 async def get_producer() -> AIOKafkaProducer:
-    global _producer
+    global _producer, _producer_started
     if _producer is None:
         _producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP)
+    if _producer_started:
+        return _producer
+
     while True:
         try:
             await _producer.start()
+            _producer_started = True
             logger.info("Connected to Kafka at %s", KAFKA_BOOTSTRAP)
             break
         except Exception as exc:
@@ -37,17 +70,25 @@ async def get_producer() -> AIOKafkaProducer:
     return _producer
 
 
-def _peek_validate(file_path: str, ext: str):
+@app.on_event("shutdown")
+async def shutdown_producer() -> None:
+    global _producer_started
+    if _producer is not None and _producer_started:
+        await _producer.stop()
+        _producer_started = False
+
+
+def _peek_validate(file_path: str, ext: str) -> None:
     """Peek into the file to ensure it's a valid CSV or Parquet."""
     if ext == ".csv":
         with open(file_path, "rb") as f:
             head = f.read(1024)
         try:
             text = head.decode("utf-8")
-        except UnicodeDecodeError as e:
+        except UnicodeDecodeError as exc:
             raise HTTPException(
-                status.HTTP_400_BAD_REQUEST, detail=f"Invalid CSV encoding: {e}"
-            )
+                status.HTTP_400_BAD_REQUEST, detail=f"Invalid CSV encoding: {exc}"
+            ) from exc
         lines = text.splitlines()
         if not lines:
             raise HTTPException(
@@ -55,24 +96,54 @@ def _peek_validate(file_path: str, ext: str):
             )
         try:
             csv.reader([lines[0]])
-        except Exception as e:
+        except Exception as exc:
             raise HTTPException(
-                status.HTTP_400_BAD_REQUEST, detail=f"Invalid CSV content: {e}"
-            )
-    elif ext == ".parquet":
+                status.HTTP_400_BAD_REQUEST, detail=f"Invalid CSV content: {exc}"
+            ) from exc
+        return
+
+    if ext == ".parquet":
         try:
             pq.ParquetFile(file_path)
-        except Exception as e:
+        except Exception as exc:
             raise HTTPException(
-                status.HTTP_400_BAD_REQUEST, detail=f"Invalid Parquet file: {e}"
-            )
-    else:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Unsupported file type")
+                status.HTTP_400_BAD_REQUEST, detail=f"Invalid Parquet file: {exc}"
+            ) from exc
+        return
+
+    raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Unsupported file type")
+
+
+def _rejected_rows_csv(rows: list[Dict[str, Any]]) -> str:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["ROW", "EVENT_ID", "COLUMN", "TYPE", "ERROR", "OBSERVED", "MESSAGE"])
+    for row in rows:
+        writer.writerow(
+            [
+                row.get("row", ""),
+                row.get("event_id", ""),
+                row.get("column", ""),
+                row.get("type", ""),
+                row.get("error", ""),
+                row.get("observed", ""),
+                row.get("message", ""),
+            ]
+        )
+    return buffer.getvalue()
 
 
 @app.get("/models")
 def list_models():
     return list(MODELS.values())
+
+
+@app.get("/models/{model_id}")
+def get_model(model_id: str):
+    model = MODELS.get(model_id)
+    if not model:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Model not found")
+    return model
 
 
 @app.post("/models", status_code=status.HTTP_201_CREATED)
@@ -94,12 +165,13 @@ def update_model(model_id: str, model: Dict[str, Any]):
 def delete_model(model_id: str):
     if MODELS.pop(model_id, None) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Model not found")
-    return JSONResponse(status_code=status.HTTP_204_NO_CONTENT)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.post("/jobs", status_code=status.HTTP_202_ACCEPTED)
 async def create_job(model_id: str, file: UploadFile = File(...)):
-    if model_id not in MODELS:
+    model = MODELS.get(model_id)
+    if model is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Model not found")
 
     ext = os.path.splitext(file.filename)[1].lower()
@@ -125,31 +197,49 @@ async def create_job(model_id: str, file: UploadFile = File(...)):
                 )
             f.write(chunk)
 
-    with open(tmp_path, "rb") as f:
-        contents = f.read()
-
-    job_id = uuid4().hex[:8]
-    topic = f"/batch/{job_id}"
     try:
         _peek_validate(tmp_path, ext)
+        with open(tmp_path, "rb") as f:
+            contents = f.read()
     except HTTPException:
         os.remove(tmp_path)
         raise
 
-    producer = await get_producer()
-    try:
-        await producer.send_and_wait(topic, contents)
-        logger.info("Created job %s on topic %s", job_id, topic)
-    finally:
-        os.remove(tmp_path)
-
+    job_id = uuid4().hex[:8]
+    created_at_ms = int(time.time() * 1000)
     JOBS[job_id] = {
         "id": job_id,
         "model_id": model_id,
         "state": "PENDING",
         "totals": {"rows": 0, "ok": 0, "errors": 0},
         "timings": {"waiting_ms": 0, "processing_ms": 0},
+        "rejected_rows": [],
+        "created_at_ms": created_at_ms,
     }
+
+    producer = await get_producer()
+    try:
+        await producer.send_and_wait(
+            _job_topic(job_id),
+            _encode_job_message(
+                job_id=job_id,
+                model_id=model_id,
+                schema=model["schema"],
+                filename=file.filename,
+                contents=contents,
+                created_at_ms=created_at_ms,
+            ),
+        )
+        logger.info("Created job %s on topic %s", job_id, _job_topic(job_id))
+    except Exception as exc:
+        JOBS.pop(job_id, None)
+        logger.exception("Failed to enqueue job %s", job_id)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, detail="Unable to enqueue job"
+        ) from exc
+    finally:
+        os.remove(tmp_path)
+
     return {"job_id": job_id}
 
 
@@ -163,6 +253,28 @@ def job_status(job_id: str):
     job = JOBS.get(job_id)
     if not job:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Job not found")
+    return job
+
+
+@app.put("/internal/jobs/{job_id}")
+def update_job(job_id: str, update: Dict[str, Any]):
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Job not found")
+
+    if job.get("state") == "CANCELLED":
+        return job
+
+    if "state" in update:
+        job["state"] = update["state"]
+    if "totals" in update:
+        job["totals"] = update["totals"]
+    if "timings" in update:
+        job["timings"] = update["timings"]
+    if "rejected_rows" in update:
+        job["rejected_rows"] = update["rejected_rows"]
+    if "detail" in update:
+        job["detail"] = update["detail"]
     return job
 
 
@@ -181,9 +293,7 @@ def rejected_rows(job_id: str):
     if not job:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Job not found")
 
-    async def iterator():
-        yield "ROW,EVENT_ID,COLUMN,TYPE,ERROR,OBSERVED,MESSAGE\n"
-
-    return StreamingResponse(iterator(), media_type="text/csv")
-
-
+    return StreamingResponse(
+        iter([_rejected_rows_csv(job.get("rejected_rows", []))]),
+        media_type="text/csv",
+    )
